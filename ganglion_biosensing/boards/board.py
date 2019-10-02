@@ -21,6 +21,9 @@ class BoardType(Enum):
 
 class BaseBiosensingBoard(AbstractContextManager):
 
+    def __init__(self):
+        self._sample_q: 'queue.Queue[OpenBCISample]' = queue.Queue()
+
     def __enter__(self) -> BaseBiosensingBoard:
         self.connect()
         return self
@@ -38,7 +41,7 @@ class BaseBiosensingBoard(AbstractContextManager):
         pass
 
     @abstractmethod
-    def start_streaming(self) -> 'queue.Queue[OpenBCISample]':
+    def start_streaming(self) -> None:
         pass
 
     @abstractmethod
@@ -54,3 +57,7 @@ class BaseBiosensingBoard(AbstractContextManager):
     @abstractmethod
     def board_type(self) -> BoardType:
         pass
+
+    @property
+    def samples(self) -> 'queue.Queue[OpenBCISample]':
+        return self._sample_q

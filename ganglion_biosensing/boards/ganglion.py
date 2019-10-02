@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from enum import Enum
 from typing import Optional
 
@@ -97,24 +98,52 @@ class GanglionBoard(BaseBiosensingBoard):
     def __init__(self, mac: Optional[str] = None):
         self._logger = logging.getLogger(self.__class__.__name__)
         self._mac_address = find_mac() if not mac else mac
+        self._ganglion = None
+
+        self._shutdown_event = threading.Event()
+        self._shutdown_event.set()
+
+        self._streaming_thread = threading.Thread(
+            target=GanglionBoard._streaming,
+            args=(self,))
+
+    def _streaming(self):
+        self._ganglion.send_command(_GanglionCommand.STREAM_START)
+        while not self._shutdown_event.is_set():
+            # todo
+            pass
 
     def connect(self) -> None:
+        if self._ganglion:
+            raise OSError('Already connected!')
         self._logger.debug(f'Connecting to Ganglion with MAC address '
                            f'{self._mac_address}')
+        self._ganglion = _GanglionPeripheral(self._mac_address)
 
     def disconnect(self) -> None:
-        pass
+        if self._ganglion:
+            if not self._shutdown_event.is_set():
+                self.stop_streaming()
 
-    def start_streaming(self) -> 'queue.Queue[OpenBCISample]':
-        pass
+            self._ganglion.disconnect()
+            self._ganglion = None
+
+    def start_streaming(self) -> None:
+        if not self._shutdown_event.is_set():
+            self._logger.warning('Already streaming!')
+        else:
+            self._shutdown_event.clear()
+            self._streaming_thread.start()
 
     def stop_streaming(self) -> None:
-        pass
+        self._logger.debug('Stopping stream.')
+        self._shutdown_event.set()
+        self._streaming_thread.join()
 
     @property
     def is_streaming(self) -> bool:
-        pass
+        return not self._shutdown_event.is_set()
 
     @property
     def board_type(self) -> BoardType:
-        pass
+        return BoardType.GANGLION
