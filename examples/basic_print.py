@@ -1,4 +1,4 @@
-from ganglion_biosensing.boards.ganglion import GanglionBoard
+from ganglion_biosensing.board.ganglion import GanglionBoard
 
 if __name__ == '__main__':
     with GanglionBoard(mac='D2:EA:16:D2:EB:3F') as board:

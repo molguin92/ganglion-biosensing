@@ -7,7 +7,7 @@ from bluepy.btle import Scanner
 
 def find_mac() -> str:
     """
-    Scans for nearby Ganglion boards, and returns the MAC address of the
+    Scans for nearby Ganglion board, and returns the MAC address of the
     first one detected.
 
     Requires root!
@@ -24,7 +24,7 @@ def find_mac() -> str:
                 gang_macs.append(dev.addr)
 
     if len(gang_macs) < 1:
-        raise OSError('No nearby Ganglion boards discovered.')
+        raise OSError('No nearby Ganglion board discovered.')
     else:
         return gang_macs[0]
 

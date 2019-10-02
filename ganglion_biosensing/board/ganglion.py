@@ -9,7 +9,7 @@ import numpy as np
 from bitstring import BitArray
 from bluepy.btle import DefaultDelegate, Peripheral
 
-from ganglion_biosensing.boards.board import BaseBiosensingBoard, BoardType, \
+from ganglion_biosensing.board.board import BaseBiosensingBoard, BoardType, \
     OpenBCISample
 from ganglion_biosensing.util.bluetooth import decompress_signed, find_mac
 from ganglion_biosensing.util.constants.ganglion import GanglionCommand, \
