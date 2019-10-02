@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import queue
 import threading
-from enum import Enum
 from typing import Iterable, Optional, Tuple
 
 import numpy as np
@@ -13,10 +12,7 @@ from bluepy.btle import DefaultDelegate, Peripheral
 from ganglion_biosensing.boards.board import BaseBiosensingBoard, BoardType, \
     OpenBCISample
 from ganglion_biosensing.util.bluetooth import find_mac
-
-# sampling rate
-_DEFAULT_SAMPLING_RATE = 200  # Hz
-_DEFAULT_DELTA_T = 1.0 / _DEFAULT_SAMPLING_RATE  # ms
+from ganglion_biosensing.util.constants.ganglion import *
 
 
 def _decompress_signed(pkt_id: int, bit_array: BitArray) \
@@ -41,63 +37,27 @@ def _decompress_signed(pkt_id: int, bit_array: BitArray) \
     return sample_1, sample_2
 
 
-class _GanglionCommand(bytes, Enum):
-    CHANNEL_1_ON = '!'.encode('ascii')
-    CHANNEL_2_ON = '@'.encode('ascii')
-    CHANNEL_3_ON = '#'.encode('ascii')
-    CHANNEL_4_ON = '$'.encode('ascii')
-    CHANNEL_1_OFF = '1'.encode('ascii')
-    CHANNEL_2_OFF = '2'.encode('ascii')
-    CHANNEL_3_OFF = '3'.encode('ascii')
-    CHANNEL_4_OFF = '4'.encode('ascii')
-    SYNTH_SQR_ON = '['.encode('ascii')
-    SYNTH_SQR_OFF = ']'.encode('ascii')
-    IMP_TEST_START = 'z'.encode('ascii')
-    IMP_TEST_STOP = 'Z'.encode('ascii')
-    ACCEL_ON = 'n'.encode('ascii')
-    ACCEL_OFF = 'N'.encode('ascii')
-    SD_LOGGING_5MIN = 'A'.encode('ascii')
-    SD_LOGGING_15MIN = 'S'.encode('ascii')
-    SD_LOGGING_30MIN = 'F'.encode('ascii')
-    SD_LOGGING_1HR = 'G'.encode('ascii')
-    SD_LOGGING_2HR = 'H'.encode('ascii')
-    SD_LOGGING_4HR = 'J'.encode('ascii')
-    SD_LOGGING_12HR = 'K'.encode('ascii')
-    SD_LOGGING_24HR = 'L'.encode('ascii')
-    SD_LOGGING_TEST = 'a'.encode('ascii')
-    SD_LOGGING_STOP = 'j'.encode('ascii')
-    STREAM_START = 'b'.encode('ascii')
-    STREAM_STOP = 's'.encode('ascii')
-    QUERY_REGS = '?'.encode('ascii')
-    RESET = 'v'.encode('ascii')
-    # TODO: change sampling rate and WiFi shield commands
-
-
 class _GanglionPeripheral(Peripheral):
-    # service for communication, as per docs
-    _BLE_SERVICE = 'fe84'
-    # characteristics of interest
-    _BLE_CHAR_RECEIVE = '2d30c082f39f4ce6923f3484ea480596'
-    _BLE_CHAR_SEND = '2d30c083f39f4ce6923f3484ea480596'
-    _BLE_CHAR_DISCONNECT = '2d30c084f39f4ce6923f3484ea480596'
-    _NOTIF_UUID = 0x2902
-
     def __init__(self, mac: str):
         super().__init__(mac, 'random')
         self._logger = logging.getLogger(self.__class__.__name__)
 
-        self._service = self.getServiceByUUID(self._BLE_SERVICE)
+        self._service = \
+            self.getServiceByUUID(GanglionConstants.BLE_SERVICE)
         self._char_read = self._service.getCharacteristics(
-            self._BLE_CHAR_RECEIVE)[0]
+            GanglionConstants.BLE_CHAR_RECEIVE)[0]
         self._char_write = \
-            self._service.getCharacteristics(self._BLE_CHAR_SEND)[0]
+            self._service.getCharacteristics(
+                GanglionConstants.BLE_CHAR_SEND)[0]
         self._char_discon = \
-            self._service.getCharacteristics(self._BLE_CHAR_DISCONNECT)[0]
+            self._service.getCharacteristics(
+                GanglionConstants.BLE_CHAR_DISCONNECT)[0]
 
         # enable notifications:
         try:
             desc_notify = \
-                self._char_read.getDescriptors(forUUID=self._NOTIF_UUID)[0]
+                self._char_read.getDescriptors(
+                    forUUID=GanglionConstants.NOTIF_UUID)[0]
             desc_notify.write(b'\x01')
         except Exception as e:
             self._logger.error(
@@ -106,7 +66,7 @@ class _GanglionPeripheral(Peripheral):
 
         self._logger.debug('Connection established.')
 
-    def send_command(self, cmd: _GanglionCommand) -> None:
+    def send_command(self, cmd: GanglionCommand) -> None:
         self._char_write.write(cmd.value)
 
     def disconnect(self):
@@ -141,10 +101,10 @@ class GanglionBoard(BaseBiosensingBoard):
             args=(self,))
 
     def _streaming(self):
-        self._ganglion.send_command(_GanglionCommand.STREAM_START)
+        self._ganglion.send_command(GanglionCommand.STREAM_START)
         while not self._shutdown_event.is_set():
             try:
-                self._ganglion.waitForNotifications(_DEFAULT_DELTA_T)
+                self._ganglion.waitForNotifications(GanglionConstants.DELTA_T)
             except Exception as e:
                 self._logger.error('Something went wrong: ', e)
                 return
