@@ -14,6 +14,10 @@ from ganglion_biosensing.boards.board import BaseBiosensingBoard, BoardType, \
     OpenBCISample
 from ganglion_biosensing.util.bluetooth import find_mac
 
+# sampling rate
+_DEFAULT_SAMPLING_RATE = 200  # Hz
+_DEFAULT_DELTA_T = 1.0 / _DEFAULT_SAMPLING_RATE  # ms
+
 
 def _decompress_signed(pkt_id: int, bit_array: BitArray) \
         -> 'Tuple[np.ndarray, np.ndarray]':
@@ -136,15 +140,20 @@ class GanglionBoard(BaseBiosensingBoard):
     def _streaming(self):
         self._ganglion.send_command(_GanglionCommand.STREAM_START)
         while not self._shutdown_event.is_set():
-            # todo
-            pass
+            try:
+                self._ganglion.waitForNotifications(_DEFAULT_DELTA_T)
+            except Exception as e:
+                self._logger.error("Something went wrong: ", e)
+                return
 
     def connect(self) -> None:
         if self._ganglion:
             raise OSError('Already connected!')
+
         self._logger.debug(f'Connecting to Ganglion with MAC address '
                            f'{self._mac_address}')
         self._ganglion = _GanglionPeripheral(self._mac_address)
+        self._ganglion.setDelegate(_GanglionDelegate(self._sample_q))
 
     def disconnect(self) -> None:
         if self._ganglion:
@@ -178,7 +187,7 @@ class GanglionBoard(BaseBiosensingBoard):
 class _GanglionDelegate(DefaultDelegate):
     def __init__(self, result_q: 'queue.Queue[OpenBCISample]'):
         super().__init__()
-        self._last_values = np.array[0, 0, 0, 0]
+        self._last_values = np.array([0, 0, 0, 0], dtype=np.int32)
         self._last_id = -1
         self._result_q = result_q
         self._sample_cnt = 0
