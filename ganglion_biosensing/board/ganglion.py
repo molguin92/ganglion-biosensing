@@ -15,9 +15,29 @@ from ganglion_biosensing.util.bluetooth import decompress_signed, find_mac
 from ganglion_biosensing.util.constants.ganglion import GanglionCommand, \
     GanglionConstants
 
+# TODO: implement accelerometer reading
+
 
 class GanglionBoard(BaseBiosensingBoard):
+    """
+    Represents an OpenBCI Ganglion board, providing methods to access the
+    streaming data in an asynchronous manner using queues.
+
+    The easiest way to use this class is as a context manager, see the
+    included examples for reference.
+    """
     def __init__(self, mac: Optional[str] = None):
+        """
+        Initialize this board, indicating the MAC address of the target board.
+
+        If the MAC address is not provided, automatic discovery will be
+        attempted, which might require root privileges.
+
+        Note that this doesn't actually connect to the board until connect()
+        is manually called (or invoked through a context manager).
+
+        :param mac: MAC address of the board.
+        """
         super().__init__()
         self._logger = logging.getLogger(self.__class__.__name__)
         self._mac_address = find_mac() if not mac else mac
@@ -40,8 +60,14 @@ class GanglionBoard(BaseBiosensingBoard):
                 return
 
     def connect(self) -> None:
+        """
+        Connect to the board.
+
+        Automatically called when this object is used as a context manager.
+        """
         if self._ganglion:
-            raise OSError('Already connected!')
+            self._logger.warning('Already connected!')
+            return
 
         self._logger.debug(f'Connecting to Ganglion with MAC address '
                            f'{self._mac_address}')
@@ -49,6 +75,12 @@ class GanglionBoard(BaseBiosensingBoard):
         self._ganglion.setDelegate(_GanglionDelegate(self._sample_q))
 
     def disconnect(self) -> None:
+        """
+        Disconnects from the board.
+
+        Automatically called when this object is used as a context manager,
+        at the end of the with-block
+        """
         if self._ganglion:
             if not self._shutdown_event.is_set():
                 self.stop_streaming()
@@ -57,6 +89,10 @@ class GanglionBoard(BaseBiosensingBoard):
             self._ganglion = None
 
     def start_streaming(self) -> None:
+        """
+        Initiates streaming of data from the board. Samples are
+        asynchronously stored in self.samples queue of this object.
+        """
         if not self._shutdown_event.is_set():
             self._logger.warning('Already streaming!')
         else:
@@ -64,9 +100,17 @@ class GanglionBoard(BaseBiosensingBoard):
             self._streaming_thread.start()
 
     def stop_streaming(self) -> None:
+        """
+        Stop streaming from the board.
+        """
         self._logger.debug('Stopping stream.')
         self._shutdown_event.set()
         self._streaming_thread.join()
+
+        # reset the thread
+        self._streaming_thread = threading.Thread(
+            target=GanglionBoard._streaming,
+            args=(self,))
 
     @property
     def is_streaming(self) -> bool:

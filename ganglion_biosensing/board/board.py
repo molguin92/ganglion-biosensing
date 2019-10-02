@@ -60,4 +60,8 @@ class BaseBiosensingBoard(AbstractContextManager):
 
     @property
     def samples(self) -> 'queue.Queue[OpenBCISample]':
+        """
+        Queue object containing the samples collected by the board during
+        streaming.
+        """
         return self._sample_q
