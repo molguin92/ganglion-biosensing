@@ -1,3 +1,7 @@
+from typing import Iterable, Tuple
+
+import numpy as np
+from bitstring import BitArray
 from bluepy.btle import Scanner
 
 
@@ -23,3 +27,27 @@ def find_mac() -> str:
         raise OSError('No nearby Ganglion boards discovered.')
     else:
         return gang_macs[0]
+
+
+def decompress_signed(pkt_id: int, bit_array: BitArray) \
+        -> 'Tuple[np.ndarray, np.ndarray]':
+    channel_samples = bit_array.cut(18) if pkt_id <= 100 else bit_array.cut(19)
+
+    def _process_channels(sample: Iterable[BitArray]) -> np.ndarray:
+        sample_deltas = []
+        for channel_data in sample:
+            channel_delta = channel_data.uint
+            if channel_data.endswith('0b1'):
+                # ends with a 1 means that it's a negative number
+                channel_delta -= 1
+                channel_delta *= -1
+            sample_deltas.append(channel_delta)
+
+        return np.array(sample_deltas, dtype=np.int32)
+
+    channel_samples = list(channel_samples)
+    sample_1 = _process_channels(channel_samples[:4])
+    sample_2 = _process_channels(channel_samples[4:])
+    return sample_1, sample_2
+
+
