@@ -5,10 +5,12 @@ from abc import abstractmethod
 from contextlib import AbstractContextManager
 from enum import Enum
 from typing import NamedTuple
+import numpy as np
 
 
 class OpenBCISample(NamedTuple):
     seq: int
+    pkt_id: int
     channel_data: np.ndarray
 
 

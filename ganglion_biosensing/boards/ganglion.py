@@ -35,6 +35,7 @@ def _decompress_signed(pkt_id: int, bit_array: BitArray) \
 
         return np.array(sample_deltas, dtype=np.int32)
 
+    channel_samples = list(channel_samples)
     sample_1 = _process_channels(channel_samples[:4])
     sample_2 = _process_channels(channel_samples[4:])
     return sample_1, sample_2
@@ -74,11 +75,11 @@ class _GanglionCommand(bytes, Enum):
 
 class _GanglionPeripheral(Peripheral):
     # service for communication, as per docs
-    _BLE_SERVICE = "fe84"
+    _BLE_SERVICE = 'fe84'
     # characteristics of interest
-    _BLE_CHAR_RECEIVE = "2d30c082f39f4ce6923f3484ea480596"
-    _BLE_CHAR_SEND = "2d30c083f39f4ce6923f3484ea480596"
-    _BLE_CHAR_DISCONNECT = "2d30c084f39f4ce6923f3484ea480596"
+    _BLE_CHAR_RECEIVE = '2d30c082f39f4ce6923f3484ea480596'
+    _BLE_CHAR_SEND = '2d30c083f39f4ce6923f3484ea480596'
+    _BLE_CHAR_DISCONNECT = '2d30c084f39f4ce6923f3484ea480596'
     _NOTIF_UUID = 0x2902
 
     def __init__(self, mac: str):
@@ -86,8 +87,10 @@ class _GanglionPeripheral(Peripheral):
         self._logger = logging.getLogger(self.__class__.__name__)
 
         self._service = self.getServiceByUUID(self._BLE_SERVICE)
-        self._char_read = self.getCharacteristics(self._BLE_CHAR_RECEIVE)[0]
-        self._char_write = self.getCharacteristics(self._BLE_CHAR_SEND)[0]
+        self._char_read = self._service.getCharacteristics(
+            self._BLE_CHAR_RECEIVE)[0]
+        self._char_write = \
+            self._service.getCharacteristics(self._BLE_CHAR_SEND)[0]
         self._char_discon = \
             self._service.getCharacteristics(self._BLE_CHAR_DISCONNECT)[0]
 
@@ -98,10 +101,10 @@ class _GanglionPeripheral(Peripheral):
             desc_notify.write(b'\x01')
         except Exception as e:
             self._logger.error(
-                "Something went wrong while trying to enable notifications:", e)
+                'Something went wrong while trying to enable notifications:', e)
             raise
 
-        self._logger.debug("Connection established.")
+        self._logger.debug('Connection established.')
 
     def send_command(self, cmd: _GanglionCommand) -> None:
         self._char_write.write(cmd.value)
@@ -143,7 +146,7 @@ class GanglionBoard(BaseBiosensingBoard):
             try:
                 self._ganglion.waitForNotifications(_DEFAULT_DELTA_T)
             except Exception as e:
-                self._logger.error("Something went wrong: ", e)
+                self._logger.error('Something went wrong: ', e)
                 return
 
     def connect(self) -> None:
@@ -195,8 +198,8 @@ class _GanglionDelegate(DefaultDelegate):
         self._wait_for_full_pkt = True
 
     def handleNotification(self, cHandle, data):
-        """Called when data is received. It parses the raw data from the
-        Ganglion and returns an OpenBCISample object"""
+        '''Called when data is received. It parses the raw data from the
+        Ganglion and returns an OpenBCISample object'''
 
         if len(data) < 1:
             self._logger.warning('A packet should at least hold one byte...')
@@ -234,15 +237,15 @@ class _GanglionDelegate(DefaultDelegate):
             results = []
             # and split it into 24-bit chunks here
             for sub_array in bit_array.cut(24):
-                # calling ".int" interprets the value as signed 2's complement
+                # calling '.int' interprets the value as signed 2's complement
                 results.append(sub_array.int)
 
             self._last_values = np.array(results, dtype=np.int32)
 
             # store the sample
-            self._result_q.put(OpenBCISample(self._sample_cnt,
+            self._result_q.put(OpenBCISample(self._sample_cnt - 1,
+                                             start_byte,
                                              self._last_values))
-            self._sample_cnt += 1
 
         elif 1 <= start_byte <= 200:
             for byte in data[1:]:
@@ -254,13 +257,14 @@ class _GanglionDelegate(DefaultDelegate):
             self._last_values = tmp_value - delta_2
 
             self._result_q.put(
-                OpenBCISample(self._sample_cnt, tmp_value))
+                OpenBCISample(self._sample_cnt - 2, start_byte, tmp_value))
             self._result_q.put(
-                OpenBCISample(self._sample_cnt + 1, self._last_values))
-            self._sample_cnt += 2
+                OpenBCISample(self._sample_cnt - 1,
+                              start_byte,
+                              self._last_values))
 
     def _upd_sample_count(self, num):
-        """Checks dropped packets"""
+        '''Checks dropped packets'''
         dropped = 0
         dummy_samples = []
         if num not in [0, 206, 207]:
@@ -277,9 +281,15 @@ class _GanglionDelegate(DefaultDelegate):
             dummy_samples = []
             for i in range(dropped, -1, -1):
                 dummy_samples.extend([
-                    OpenBCISample(self._sample_cnt, np.array([np.NaN] * 4)),
-                    OpenBCISample(self._sample_cnt + 1, np.array([np.NaN] * 4))
+                    OpenBCISample(self._sample_cnt,
+                                  num - i,
+                                  np.array([np.NaN] * 4)),
+                    OpenBCISample(self._sample_cnt + 1,
+                                  num - i,
+                                  np.array([np.NaN] * 4))
                 ])
                 self._sample_cnt += 2
+        else:
+            self._sample_cnt += 1
         self._last_id = num
         return dropped, dummy_samples
