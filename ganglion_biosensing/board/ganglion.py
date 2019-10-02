@@ -30,6 +30,15 @@ class GanglionBoard(BaseBiosensingBoard):
             target=GanglionBoard._streaming,
             args=(self,))
 
+    def enable_accelerometer_data(self, enabled: bool) -> None:
+        if not self._shutdown_event.is_set():
+            self._logger.warning('Unable to toggle accelerometer data while '
+                                 'stream is active!')
+        else:
+            self._ganglion.send_command(GanglionCommand.ACCEL_ON if enabled
+                                        else GanglionCommand.ACCEL_OFF)
+            # TODO: actually parse accel data?
+
     def _streaming(self):
         self._ganglion.send_command(GanglionCommand.STREAM_START)
         while not self._shutdown_event.is_set():
