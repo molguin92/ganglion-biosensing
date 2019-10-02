@@ -4,8 +4,14 @@ import queue
 from abc import abstractmethod
 from contextlib import AbstractContextManager
 from enum import Enum
+from typing import NamedTuple
 
-from boards.sample import OpenBCISample
+
+class OpenBCISample(NamedTuple):
+    seq: int
+    timestamp: float
+    channel_data: np.ndarray
+    board: BoardType
 
 
 class BoardType(Enum):
