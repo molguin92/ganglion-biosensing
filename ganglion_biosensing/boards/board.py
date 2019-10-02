@@ -9,9 +9,7 @@ from typing import NamedTuple
 
 class OpenBCISample(NamedTuple):
     seq: int
-    timestamp: float
     channel_data: np.ndarray
-    board: BoardType
 
 
 class BoardType(Enum):
