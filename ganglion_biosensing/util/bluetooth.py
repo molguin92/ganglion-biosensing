@@ -49,5 +49,3 @@ def decompress_signed(pkt_id: int, bit_array: BitArray) \
     sample_1 = _process_channels(channel_samples[:4])
     sample_2 = _process_channels(channel_samples[4:])
     return sample_1, sample_2
-
-

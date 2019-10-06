@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-import queue
+import logging
 from abc import abstractmethod
 from contextlib import AbstractContextManager
 from enum import Enum
-from typing import NamedTuple
+from typing import Any, Callable, NamedTuple
+
 import numpy as np
 
 
 class OpenBCISample(NamedTuple):
+    timestamp: float
     seq: int
     pkt_id: int
     channel_data: np.ndarray
@@ -22,7 +24,14 @@ class BoardType(Enum):
 class BaseBiosensingBoard(AbstractContextManager):
 
     def __init__(self):
-        self._sample_q: 'queue.Queue[OpenBCISample]' = queue.Queue()
+        self._logger = logging.getLogger(self.__class__.__name__)
+        self._sample_callback = self._default_callback
+
+    def set_callback(self, callback: Callable[[OpenBCISample], Any]) -> None:
+        self._sample_callback = callback
+
+    def _default_callback(self, sample):
+        self._logger.debug(f'Default callback: {sample}')
 
     def __enter__(self) -> BaseBiosensingBoard:
         self.connect()
@@ -57,11 +66,3 @@ class BaseBiosensingBoard(AbstractContextManager):
     @abstractmethod
     def board_type(self) -> BoardType:
         pass
-
-    @property
-    def samples(self) -> 'queue.Queue[OpenBCISample]':
-        """
-        Queue object containing the samples collected by the board during
-        streaming.
-        """
-        return self._sample_q

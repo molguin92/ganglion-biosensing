@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-import queue
 import threading
-from typing import Optional
+import time
+from typing import Any, Callable, Iterator, List, Optional, Tuple
 
 import numpy as np
 from bitstring import BitArray
@@ -14,6 +14,7 @@ from ganglion_biosensing.board.board import BaseBiosensingBoard, BoardType, \
 from ganglion_biosensing.util.bluetooth import decompress_signed, find_mac
 from ganglion_biosensing.util.constants.ganglion import GanglionCommand, \
     GanglionConstants
+
 
 # TODO: implement accelerometer reading
 
@@ -26,7 +27,10 @@ class GanglionBoard(BaseBiosensingBoard):
     The easiest way to use this class is as a context manager, see the
     included examples for reference.
     """
-    def __init__(self, mac: Optional[str] = None):
+
+    def __init__(self,
+                 mac: Optional[str] = None,
+                 callback: Optional[Callable[[OpenBCISample], Any]] = None):
         """
         Initialize this board, indicating the MAC address of the target board.
 
@@ -42,6 +46,9 @@ class GanglionBoard(BaseBiosensingBoard):
         self._logger = logging.getLogger(self.__class__.__name__)
         self._mac_address = find_mac() if not mac else mac
         self._ganglion = None
+
+        if callback:
+            self._sample_callback = callback
 
         self._shutdown_event = threading.Event()
         self._shutdown_event.set()
@@ -71,8 +78,8 @@ class GanglionBoard(BaseBiosensingBoard):
 
         self._logger.debug(f'Connecting to Ganglion with MAC address '
                            f'{self._mac_address}')
+        # TODO: fix
         self._ganglion = _GanglionPeripheral(self._mac_address)
-        self._ganglion.setDelegate(_GanglionDelegate(self._sample_q))
 
     def disconnect(self) -> None:
         """
@@ -96,6 +103,7 @@ class GanglionBoard(BaseBiosensingBoard):
         if not self._shutdown_event.is_set():
             self._logger.warning('Already streaming!')
         else:
+            self._ganglion.setDelegate(_GanglionDelegate(self._sample_callback))
             self._shutdown_event.clear()
             self._streaming_thread.start()
 
@@ -120,20 +128,34 @@ class GanglionBoard(BaseBiosensingBoard):
     def board_type(self) -> BoardType:
         return BoardType.GANGLION
 
+    def set_callback(self, callback: Callable[[OpenBCISample], Any]) -> None:
+        if not self._shutdown_event.is_set():
+            self._logger.warning('Unable to set callback while streaming.')
+        else:
+            super().set_callback(callback)
+
 
 class _GanglionDelegate(DefaultDelegate):
-    def __init__(self, result_q: 'queue.Queue[OpenBCISample]'):
+    def __init__(self, callback: Callable[[OpenBCISample], Any]):
         super().__init__()
         self._last_values = np.array([0, 0, 0, 0], dtype=np.int32)
         self._last_id = -1
-        self._result_q = result_q
+        self._result_callback = callback
         self._sample_cnt = 0
+        self._timestamps = None
         self._logger = logging.getLogger(self.__class__.__name__)
         self._wait_for_full_pkt = True
 
+    @staticmethod
+    def _timestamp_generator() -> Iterator[float]:
+        timestamp = time.time()
+        while True:
+            yield timestamp
+            timestamp = timestamp + GanglionConstants.DELTA_T
+
     def handleNotification(self, cHandle, data):
-        '''Called when data is received. It parses the raw data from the
-        Ganglion and returns an OpenBCISample object'''
+        """Called when data is received. It parses the raw data from the
+        Ganglion and returns an OpenBCISample object"""
 
         if len(data) < 1:
             self._logger.warning('A packet should at least hold one byte...')
@@ -144,27 +166,13 @@ class _GanglionDelegate(DefaultDelegate):
 
         dropped, dummy_samples = self._upd_sample_count(start_byte)
 
-        if self._wait_for_full_pkt:
-            if start_byte != 0:
-                self._logger.warning('Need to wait for next full packet...')
-                for dummy in dummy_samples:
-                    self._result_q.put(dummy)
-                return
-            else:
-                self._logger.warning('Got full packet, resuming.')
-                self._wait_for_full_pkt = False
-
-        if dropped > 0:
-            self._logger.error(f'Dropped {dropped} packets! '
-                               'Need to wait for next full packet...')
-
-            for dummy in dummy_samples:
-                self._result_q.put(dummy)
-            self._wait_for_full_pkt = True
-            return
-
         if start_byte == 0:
             # uncompressed sample
+            if not self._timestamps:
+                self._timestamps = _GanglionDelegate._timestamp_generator()
+
+            self._wait_for_full_pkt = False
+
             for byte in data[1:13]:
                 bit_array.append(f'0b{byte:08b}')
 
@@ -177,28 +185,47 @@ class _GanglionDelegate(DefaultDelegate):
             self._last_values = np.array(results, dtype=np.int32)
 
             # store the sample
-            self._result_q.put(OpenBCISample(self._sample_cnt - 1,
-                                             start_byte,
-                                             self._last_values))
-
-        elif 1 <= start_byte <= 200:
-            for byte in data[1:]:
-                bit_array.append(f'0b{byte:08b}')
-
-            delta_1, delta_2 = decompress_signed(start_byte, bit_array)
-
-            tmp_value = self._last_values - delta_1
-            self._last_values = tmp_value - delta_2
-
-            self._result_q.put(
-                OpenBCISample(self._sample_cnt - 2, start_byte, tmp_value))
-            self._result_q.put(
-                OpenBCISample(self._sample_cnt - 1,
+            self._result_callback(
+                OpenBCISample(next(self._timestamps),
+                              self._sample_cnt - 1,
                               start_byte,
                               self._last_values))
 
-    def _upd_sample_count(self, num):
-        '''Checks dropped packets'''
+        elif 1 <= start_byte <= 200:
+            if self._wait_for_full_pkt:
+                self._logger.warning('Need to wait for next full packet...')
+                for dummy in dummy_samples:
+                    self._result_callback(dummy)
+                return
+            elif dropped > 0:
+                self._logger.error(f'Dropped {dropped} packets! '
+                                   'Need to wait for next full packet...')
+
+                for dummy in dummy_samples:
+                    self._result_callback(dummy)
+                self._wait_for_full_pkt = True
+                return
+            else:
+                for byte in data[1:]:
+                    bit_array.append(f'0b{byte:08b}')
+
+                delta_1, delta_2 = decompress_signed(start_byte, bit_array)
+
+                tmp_value = self._last_values - delta_1
+                self._last_values = tmp_value - delta_2
+
+                self._result_callback(
+                    OpenBCISample(next(self._timestamps),
+                                  self._sample_cnt - 2,
+                                  start_byte, tmp_value))
+                self._result_callback(
+                    OpenBCISample(next(self._timestamps),
+                                  self._sample_cnt - 1,
+                                  start_byte,
+                                  self._last_values))
+
+    def _upd_sample_count(self, num) -> Tuple[int, List[OpenBCISample]]:
+        """Checks dropped packets"""
         dropped = 0
         dummy_samples = []
         if num not in [0, 206, 207]:
@@ -215,10 +242,12 @@ class _GanglionDelegate(DefaultDelegate):
             dummy_samples = []
             for i in range(dropped, -1, -1):
                 dummy_samples.extend([
-                    OpenBCISample(self._sample_cnt,
+                    OpenBCISample(next(self._timestamps),
+                                  self._sample_cnt,
                                   num - i,
                                   np.array([np.NaN] * 4)),
-                    OpenBCISample(self._sample_cnt + 1,
+                    OpenBCISample(next(self._timestamps),
+                                  self._sample_cnt + 1,
                                   num - i,
                                   np.array([np.NaN] * 4))
                 ])
