@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from abc import abstractmethod
 from contextlib import AbstractContextManager
 from enum import Enum
@@ -25,10 +26,12 @@ class BaseBiosensingBoard(AbstractContextManager):
 
     def __init__(self):
         self._logger = logging.getLogger(self.__class__.__name__)
+        self._callback_lock = threading.RLock()
         self._sample_callback = self._default_callback
 
     def set_callback(self, callback: Callable[[OpenBCISample], Any]) -> None:
-        self._sample_callback = callback
+        with self._callback_lock:
+            self._sample_callback = callback
 
     def _default_callback(self, sample):
         self._logger.debug(f'Default callback: {sample}')
