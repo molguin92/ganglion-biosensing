@@ -4,13 +4,14 @@ import queue
 import socket
 import threading
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 from ganglion_biosensing.board.board import BaseBiosensingBoard, BoardType, \
     OpenBCISample
-from ganglion_biosensing.util.constants.ganglion import GanglionCommand
+from ganglion_biosensing.util.constants.ganglion import GanglionCommand, \
+    GanglionConstants
 
 _ganglion_connect_seq = [
     {
@@ -131,14 +132,38 @@ class GanglionHubConnection(BaseBiosensingBoard):
         """
         Called by the callback thread, executes the callbacks for each sample.
         """
+
+        class _Timestamper:
+            def __init__(self):
+                self._ref_tstamp = None
+
+            def timestamp(self, ref_timestamp: Optional[float] = None):
+                if self._ref_tstamp is None:
+                    if ref_timestamp:
+                        self._ref_tstamp = ref_timestamp
+                    else:
+                        self._ref_tstamp = time.time()
+
+                ret = self._ref_tstamp
+                self._ref_tstamp += GanglionConstants.DELTA_T
+
+                return ret
+
         logger = self._logger.getChild('CALLBACK')
         logger.debug('Starting callback thread...')
+        timestamper = _Timestamper()
 
         def _handle_sample(sample: Dict):
             logger.debug(f'Handling sample: {sample}')
             # convert to OpenBCISample
+            # timestamp comes in milliseconds, convert to seconds
+            sample_time = sample.get('timestamp', -1) / 1000.0
+            calc_time = timestamper.timestamp(sample_time)
+
+            logger.debug(f'Adjusted time for sample: {calc_time}')
+            
             sample = OpenBCISample(
-                timestamp=sample.get('timestamp', -1),
+                timestamp=calc_time,
                 seq=sample.get('sampleNumber', -1),
                 pkt_id=-1,
                 channel_data=np.array(sample.get('channelData', []))
@@ -147,6 +172,7 @@ class GanglionHubConnection(BaseBiosensingBoard):
             with self._callback_lock:
                 self._sample_callback(sample)
 
+        # TODO: update setup.py
         while not self._shutdown.is_set():
             try:
                 _handle_sample(self._sample_q.get(block=True, timeout=0.01))
@@ -300,9 +326,17 @@ class GanglionHubConnection(BaseBiosensingBoard):
 
 
 if __name__ == '__main__':
-    import sys
+    class CountingCallback:
+        def __init__(self):
+            self.i = 0
 
-    logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
+        def callback(self, sample):
+            self.i += 1
+            print(self.i, sample.timestamp)
+
+
+    # logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
     with GanglionHubConnection('Ganglion-8819') as conn:
+        conn.set_callback(CountingCallback().callback)
         conn.start_streaming()
-        time.sleep(10)
+        time.sleep(5)
