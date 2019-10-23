@@ -161,7 +161,7 @@ class GanglionHubConnection(BaseBiosensingBoard):
             calc_time = timestamper.timestamp(sample_time)
 
             logger.debug(f'Adjusted time for sample: {calc_time}')
-            
+
             sample = OpenBCISample(
                 timestamp=calc_time,
                 seq=sample.get('sampleNumber', -1),
@@ -172,7 +172,6 @@ class GanglionHubConnection(BaseBiosensingBoard):
             with self._callback_lock:
                 self._sample_callback(sample)
 
-        # TODO: update setup.py
         while not self._shutdown.is_set():
             try:
                 _handle_sample(self._sample_q.get(block=True, timeout=0.01))
