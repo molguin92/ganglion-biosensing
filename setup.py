@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 pkg_name = 'ganglion-biosensing'
-version = '0.1.6'
+version = '0.1.7'
 
 setup(
     name=pkg_name,

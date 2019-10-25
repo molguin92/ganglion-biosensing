@@ -13,6 +13,26 @@ from ganglion_biosensing.board.board import BaseBiosensingBoard, BoardType, \
 from ganglion_biosensing.util.constants.ganglion import GanglionCommand, \
     GanglionConstants
 
+# data needs to be converted from raw measurements to microvolts!
+#     private final float MCP3912_Vref = 1.2f;  // reference voltage for ADC
+#     in MCP3912 set in hardware
+
+#     private final float MCP3912_gain = 1.0;  //assumed gain setting for
+#     MCP3912.  NEEDS TO BE ADJUSTABLE JM
+
+#     private float scale_fac_uVolts_per_count = (MCP3912_Vref * 1000000.f) /
+#     (8388607.0 * MCP3912_gain * 1.5 * 51.0); //MCP3912 datasheet page 34.
+#     Gain of InAmp = 80
+
+_MCP3912_Vref = 1.2
+_MCP3912_gain = 1.0
+
+
+def _convert_count_to_uVolts(counts: int) -> float:
+    return counts * ((_MCP3912_Vref * 1000000) /
+                     (8388607.0 * _MCP3912_gain * 1.5 * 51.0))
+
+
 _ganglion_connect_seq = [
     {
         'type'   : 'command',
@@ -162,11 +182,14 @@ class GanglionHubConnection(BaseBiosensingBoard):
 
             logger.debug(f'Adjusted time for sample: {calc_time}')
 
+            channel_data = [_convert_count_to_uVolts(c) for c in
+                            sample.get('channelDataCounts', [])]
+
             sample = OpenBCISample(
                 timestamp=calc_time,
                 seq=sample.get('sampleNumber', -1),
                 pkt_id=-1,
-                channel_data=np.array(sample.get('channelData', []))
+                channel_data=np.array(channel_data, dtype=np.float64)
             )
 
             with self._callback_lock:
@@ -331,10 +354,12 @@ if __name__ == '__main__':
 
         def callback(self, sample):
             self.i += 1
-            print(self.i, sample.timestamp)
+            print(self.i, sample.timestamp, sample.channel_data)
 
 
-    # logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
+    import sys
+
+    logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
     with GanglionHubConnection('Ganglion-8819') as conn:
         conn.set_callback(CountingCallback().callback)
         conn.start_streaming()
